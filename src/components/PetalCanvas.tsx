@@ -3,19 +3,23 @@ import type { CSSProperties } from "react";
 
 type Tone = [string, string];
 
+// EXCLUSIVELY LIGHT PINK PETAL PALETTE
+// Translucent, romantic, soft bridal pinks, blush rose, cherry blossom & fresh lotus petals
 const TONES: Tone[] = [
-  // Deep Velvet Rose (South Indian bridal garland red)
-  ["#BA1B38", "#5E0919"],
-  ["#D6284C", "#7A0C22"],
-  // Lotus Pink (matching the couple's lotus garlands)
-  ["#FF758F", "#A4133C"],
-  ["#FFA4B6", "#D6284C"],
-  // Soft Rose Blush
-  ["#FBB1BD", "#C9184A"],
-  // Golden Marigold
-  ["#FFB703", "#C75100"],
-  // Fragrant Jasmine / Sambangi white
-  ["#FFFDF5", "#E8D5B7"],
+  // Soft Bridal Blush Pink
+  ["#FFF0F5", "#F8BBD0"],
+  // Pastel Cherry Blossom
+  ["#FFE4EC", "#F48FB1"],
+  // Luminous Sheer Pink
+  ["#FCE4EC", "#F06292"],
+  // Soft Lotus Petal Pink
+  ["#FFD1DC", "#FF80AB"],
+  // Delicate Rose Petal
+  ["#FFF5F8", "#F48CA4"],
+  // Whispering Pale Rose
+  ["#FFEBF0", "#FFA4B6"],
+  // Dewdrop Light Rose
+  ["#FFF2F6", "#F9A8D4"],
 ];
 
 type Petal = {
@@ -44,6 +48,8 @@ type Props = {
   maxSize?: number;
   /** fall speed multiplier */
   speed?: number;
+  /** real-time mobile tilt wind influence (-1 to +1) */
+  windTilt?: number;
   className?: string;
   style?: CSSProperties;
 };
@@ -59,22 +65,22 @@ function createPetal(
   const size = min + Math.random() * (max - min);
   const depth = max > min ? (size - min) / (max - min) : 0.5;
   return {
-    x: Math.random() * (w + 100) - 50,
+    x: Math.random() * (w + 140) - 70,
     y: seeded ? Math.random() * h : -size - Math.random() * h * 0.4,
     size,
-    vy: (28 + depth * 55) * speed,
-    vx: (Math.random() - 0.5) * 12,
-    sway: 18 + Math.random() * 42,
+    vy: (26 + depth * 50) * speed,
+    vx: (Math.random() - 0.5) * 14,
+    sway: 16 + Math.random() * 38,
     swaySpeed: 0.35 + Math.random() * 0.55,
     phase: Math.random() * Math.PI * 2,
     rot: Math.random() * Math.PI * 2,
-    rotSpeed: (Math.random() - 0.5) * 0.9,
+    rotSpeed: (Math.random() - 0.5) * 0.85,
     flipPhase: Math.random() * Math.PI * 2,
-    flipSpeed: 0.6 + Math.random() * 1.3,
+    flipSpeed: 0.6 + Math.random() * 1.25,
     rollAngle: Math.random() * Math.PI * 2,
-    rollSpeed: (Math.random() - 0.5) * 0.8,
+    rollSpeed: (Math.random() - 0.5) * 0.75,
     tone: TONES[Math.floor(Math.random() * TONES.length)],
-    alpha: 0.7 + depth * 0.3,
+    alpha: 0.68 + depth * 0.3,
   };
 }
 
@@ -107,9 +113,10 @@ function drawPetal(ctx: CanvasRenderingContext2D, p: Petal, t: number) {
   ctx.closePath();
 
   ctx.fillStyle = g;
-  ctx.shadowColor = "rgba(45, 12, 18, 0.4)";
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetY = 3;
+  // Soft luminous pink shadow for delicate, ethereal appearance
+  ctx.shadowColor = "rgba(244, 114, 150, 0.32)";
+  ctx.shadowBlur = 7;
+  ctx.shadowOffsetY = 2;
   ctx.fill();
 
   ctx.shadowColor = "transparent";
@@ -120,15 +127,15 @@ function drawPetal(ctx: CanvasRenderingContext2D, p: Petal, t: number) {
   ctx.beginPath();
   ctx.moveTo(0, -0.45 * s);
   ctx.quadraticCurveTo(0.12 * s * flip, 0.02 * s, 0, 0.45 * s);
-  ctx.strokeStyle = `rgba(255, 245, 230, ${0.28 * lightFactor})`;
+  ctx.strokeStyle = `rgba(255, 245, 250, ${0.4 * lightFactor})`;
   ctx.lineWidth = Math.max(0.65, s * 0.038);
   ctx.stroke();
 
   // Subtle highlight gleam
-  if (lightFactor > 0.6) {
+  if (lightFactor > 0.55) {
     ctx.beginPath();
     ctx.ellipse(0.08 * s, -0.15 * s, 0.2 * s, 0.35 * s, 0.2, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255, 255, 255, ${(lightFactor - 0.6) * 0.25})`;
+    ctx.fillStyle = `rgba(255, 255, 255, ${(lightFactor - 0.55) * 0.35})`;
     ctx.fill();
   }
 
@@ -136,7 +143,7 @@ function drawPetal(ctx: CanvasRenderingContext2D, p: Petal, t: number) {
 }
 
 /**
- * A drifting layer of 3D rose petals.
+ * A drifting layer of light pink rose petals.
  * Placed between the backdrop mandap and the foreground couple cut-out so the
  * petals visibly fall THROUGH the spatial gap.
  */
@@ -145,10 +152,16 @@ export default function PetalCanvas({
   minSize = 13,
   maxSize = 34,
   speed = 1,
+  windTilt = 0,
   className = "",
   style,
 }: Props) {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const windTiltRef = useRef(windTilt);
+
+  useEffect(() => {
+    windTiltRef.current = windTilt;
+  }, [windTilt]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -190,10 +203,17 @@ export default function PetalCanvas({
       elapsed += dt;
       ctx.clearRect(0, 0, w, h);
 
+      // Mobile tilt wind drift
+      const currentWind = windTiltRef.current * 48;
+
       for (const p of petals) {
         p.y += p.vy * dt;
-        p.x += p.vx * dt;
+        p.x += (p.vx + currentWind) * dt;
         p.rot += p.rotSpeed * dt;
+
+        // Wrap around horizontally if blown across edges
+        if (p.x < -80) p.x = w + 60;
+        else if (p.x > w + 80) p.x = -60;
 
         if (p.y - p.size > h + 25) {
           const fresh = createPetal(w, h, minSize, maxSize, speed, false);
@@ -237,4 +257,5 @@ export default function PetalCanvas({
 
   return <canvas ref={ref} aria-hidden="true" className={className} style={style} />;
 }
+
 
