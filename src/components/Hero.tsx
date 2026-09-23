@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import mandap from "../assets/mandap.jpg";
 import coupleCutout from "../assets/couple.png";
@@ -9,61 +9,65 @@ export default function Hero() {
   const reduced = useReducedMotion();
   const containerRef = useRef<HTMLElement | null>(null);
 
-  // Direct DOM references for 60fps GPU transforms (zero React re-renders, zero glitching)
+  // Direct DOM references for 60/120fps GPU transforms (zero React re-renders, zero glitching)
   const bgInnerRef = useRef<HTMLDivElement | null>(null);
   const figureInnerRef = useRef<HTMLDivElement | null>(null);
   const shadowInnerRef = useRef<HTMLDivElement | null>(null);
   const frontPetalsRef = useRef<HTMLDivElement | null>(null);
 
-  // Tilt targets and smoothed values
+  // Whether iOS requires explicit tap to grant motion permission
+  const [needsIosPermission, setNeedsIosPermission] = useState(false);
+  const [gyroActive, setGyroActive] = useState(false);
+
+  // Tilt targets and smoothed interpolation values
   const targetX = useRef(0);
   const targetY = useRef(0);
   const currentX = useRef(0);
   const currentY = useRef(0);
-  const windTiltRef = useRef(0);
+
+  // Touch tracking for drag fallback
+  const touchStart = useRef({ x: 0, y: 0 });
+  const isTouching = useRef(false);
 
   // Silky smooth 60/120fps GPU compositor loop
   useEffect(() => {
     let raf = 0;
-    const lerp = reduced ? 1 : 0.1;
+    const lerp = reduced ? 1 : 0.12;
 
     const tick = () => {
-      // Smooth lerp
       currentX.current += (targetX.current - currentX.current) * lerp;
       currentY.current += (targetY.current - currentY.current) * lerp;
 
       const cx = Number.isFinite(currentX.current) ? currentX.current : 0;
       const cy = Number.isFinite(currentY.current) ? currentY.current : 0;
 
-      windTiltRef.current = cx;
-
-      // Apply hardware-accelerated 3D transforms directly to DOM nodes
+      // 1. Couple tilts in true 3D perspective from their stage footing
       if (figureInnerRef.current) {
-        // Couple tilts in 3D perspective
-        const coupleTranslateX = cx * 24;
-        const coupleTranslateY = cy * 12;
-        const rotateY = cx * 8.5; // degrees roll
-        const rotateX = -cy * 6.5; // degrees pitch
-        figureInnerRef.current.style.transform = `translate3d(${coupleTranslateX.toFixed(2)}px, ${coupleTranslateY.toFixed(2)}px, 0) rotateY(${rotateY.toFixed(2)}deg) rotateX(${rotateX.toFixed(2)}deg)`;
+        const coupleTranslateX = cx * 32;
+        const coupleTranslateY = cy * 16;
+        const rotateY = cx * 12.0; // prominent degrees roll
+        const rotateX = -cy * 8.5; // prominent degrees pitch
+        figureInnerRef.current.style.transform = `perspective(750px) translate3d(${coupleTranslateX.toFixed(2)}px, ${coupleTranslateY.toFixed(2)}px, 0) rotateY(${rotateY.toFixed(2)}deg) rotateX(${rotateX.toFixed(2)}deg)`;
       }
 
+      // 2. Mandap background moves in counter-parallax (deep 3D stage depth)
       if (bgInnerRef.current) {
-        // Mandap background moves in counter-parallax
-        const bgTranslateX = -cx * 18;
-        const bgTranslateY = -cy * 12;
-        bgInnerRef.current.style.transform = `translate3d(${bgTranslateX.toFixed(2)}px, ${bgTranslateY.toFixed(2)}px, 0) scale(1.12)`;
+        const bgTranslateX = -cx * 22;
+        const bgTranslateY = -cy * 14;
+        bgInnerRef.current.style.transform = `translate3d(${bgTranslateX.toFixed(2)}px, ${bgTranslateY.toFixed(2)}px, 0) scale(1.15)`;
       }
 
+      // 3. Stage contact shadow beneath feet shifts dynamically
       if (shadowInnerRef.current) {
-        // Contact stage shadow shifts optically
-        const shadowX = -cx * 10;
-        const scaleX = Math.max(0.7, 1 - Math.abs(cx) * 0.1);
+        const shadowX = -cx * 14;
+        const scaleX = Math.max(0.65, 1 - Math.abs(cx) * 0.12);
         shadowInnerRef.current.style.transform = `translate3d(${shadowX.toFixed(2)}px, 0, 0) scaleX(${scaleX.toFixed(2)})`;
       }
 
+      // 4. Foreground petals float with camera parallax
       if (frontPetalsRef.current) {
-        const frontX = cx * 32;
-        const frontY = cy * 18;
+        const frontX = cx * 40;
+        const frontY = cy * 22;
         frontPetalsRef.current.style.transform = `translate3d(${frontX.toFixed(2)}px, ${frontY.toFixed(2)}px, 0)`;
       }
 
@@ -74,36 +78,52 @@ export default function Hero() {
     return () => cancelAnimationFrame(raf);
   }, [reduced]);
 
-  // Mobile Device Orientation (Gyroscope tilt by default)
+  // Mobile Device Orientation (Gyroscope tilt)
   useEffect(() => {
     if (reduced) return;
+
+    let baseGamma: number | null = null;
+    let baseBeta: number | null = null;
 
     const onOrientation = (e: DeviceOrientationEvent) => {
       if (e.gamma === null || e.beta === null) return;
       if (!Number.isFinite(e.gamma) || !Number.isFinite(e.beta)) return;
 
-      // Gamma = left-to-right phone roll (-90 to +90). Clamped to +/- 30 deg
-      const clampedGamma = Math.max(-30, Math.min(30, e.gamma));
-      targetX.current = clampedGamma / 30;
+      setGyroActive(true);
+      setNeedsIosPermission(false);
 
-      // Beta = front-to-back phone pitch. Natural portrait holding angle is ~45 deg
-      const naturalPitch = 45;
-      const clampedBeta = Math.max(naturalPitch - 30, Math.min(naturalPitch + 30, e.beta));
-      targetY.current = (clampedBeta - naturalPitch) / 30;
+      // Calibrate base holding angle on first measurement
+      if (baseGamma === null) baseGamma = e.gamma;
+      if (baseBeta === null) baseBeta = e.beta;
+
+      // Slow drift centering so neutral angle comfortably adapts to user posture
+      baseGamma += (e.gamma - baseGamma) * 0.003;
+      baseBeta += (e.beta - baseBeta) * 0.003;
+
+      // Relative delta from natural holding position
+      const deltaGamma = e.gamma - baseGamma;
+      const deltaBeta = e.beta - baseBeta;
+
+      // 15 degrees tilt maps to full 3D range (-1 to 1)
+      targetX.current = Math.max(-1, Math.min(1, deltaGamma / 15));
+      targetY.current = Math.max(-1, Math.min(1, deltaBeta / 15));
     };
 
-    // 1. Android & modern browsers support deviceorientation automatically
-    if (
+    // Check if iOS 13+ permission API exists
+    const hasIosPermissionApi =
       typeof window !== "undefined" &&
-      window.DeviceOrientationEvent &&
       typeof (window.DeviceOrientationEvent as unknown as { requestPermission?: () => void })
-        .requestPermission !== "function"
-    ) {
+        ?.requestPermission === "function";
+
+    if (hasIosPermissionApi) {
+      setNeedsIosPermission(true);
+    } else {
+      // Android and standard browsers: listen immediately by default
       window.addEventListener("deviceorientation", onOrientation, true);
     }
 
-    // 2. iOS 13+ Safari requires silent user interaction permission
-    const requestiOSPermission = async () => {
+    // Function to activate on user tap (required by Apple iOS)
+    const requestIosPermission = async () => {
       const DeviceOrientation = window.DeviceOrientationEvent as unknown as {
         requestPermission?: () => Promise<string>;
       };
@@ -111,25 +131,58 @@ export default function Hero() {
         try {
           const res = await DeviceOrientation.requestPermission();
           if (res === "granted") {
+            setNeedsIosPermission(false);
+            setGyroActive(true);
             window.addEventListener("deviceorientation", onOrientation, true);
           }
         } catch {
-          // ignore error if dismissed
+          // User dismissed or error
         }
       }
     };
 
-    window.addEventListener("touchstart", requestiOSPermission, { once: true, passive: true });
-    window.addEventListener("pointerdown", requestiOSPermission, { once: true, passive: true });
+    // Attach to document click/touchend so ANY tap on the screen requests iOS permission seamlessly
+    const handleDocumentClick = () => {
+      if (hasIosPermissionApi) {
+        requestIosPermission();
+      }
+    };
+
+    window.addEventListener("click", handleDocumentClick, { passive: true });
+    window.addEventListener("touchend", handleDocumentClick, { passive: true });
 
     return () => {
       window.removeEventListener("deviceorientation", onOrientation, true);
-      window.removeEventListener("touchstart", requestiOSPermission);
-      window.removeEventListener("pointerdown", requestiOSPermission);
+      window.removeEventListener("click", handleDocumentClick);
+      window.removeEventListener("touchend", handleDocumentClick);
     };
   }, [reduced]);
 
-  // Touch drag / Pointer fallback (works on desktop or when device is flat)
+  // Touch drag / Pointer fallback (works on desktop or before gyro is activated)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      isTouching.current = true;
+      touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isTouching.current || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - touchStart.current.x;
+    const dy = e.touches[0].clientY - touchStart.current.y;
+    // Normalized by half screen width
+    targetX.current = Math.max(-1, Math.min(1, dx / (window.innerWidth * 0.35)));
+    targetY.current = Math.max(-1, Math.min(1, dy / (window.innerHeight * 0.35)));
+  };
+
+  const handleTouchEnd = () => {
+    isTouching.current = false;
+    if (!gyroActive) {
+      targetX.current = 0;
+      targetY.current = 0;
+    }
+  };
+
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (reduced) return;
@@ -144,10 +197,11 @@ export default function Hero() {
   );
 
   const handlePointerLeave = useCallback(() => {
-    // Only reset if on desktop mouse
-    targetX.current = 0;
-    targetY.current = 0;
-  }, []);
+    if (!gyroActive) {
+      targetX.current = 0;
+      targetY.current = 0;
+    }
+  }, [gyroActive]);
 
   // Scroll Parallax (Smoothly isolated on outer wrappers so it never conflicts with tilt)
   const { scrollY } = useScroll();
@@ -161,8 +215,22 @@ export default function Hero() {
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
-      className="relative z-0 h-[100svh] min-h-[640px] w-full overflow-hidden bg-stage select-none"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      className="relative z-0 h-[100svh] min-h-[640px] w-full overflow-hidden bg-stage select-none cursor-pointer"
     >
+      {/* ─────────────────────────────────────────────────────────────
+          iOS SAFARI 3D ACTIVATION HINT (Appears only on iOS until tapped)
+          ───────────────────────────────────────────────────────────── */}
+      {needsIosPermission && (
+        <div className="absolute top-5 right-5 z-40 animate-pulse pointer-events-none">
+          <div className="rounded-full border border-gold/50 bg-kumkum-dark/95 px-3.5 py-1.5 text-[0.72rem] font-medium tracking-wide text-gold-light shadow-[0_4px_20px_rgba(20,8,3,0.6)] backdrop-blur-md">
+            ✨ Tap screen to enable 3D Tilt
+          </div>
+        </div>
+      )}
+
       {/* ─────────────────────────────────────────────────────────────
           PLATE 1: MANDAP BACKGROUND (Farthest 3D Layer, z-0)
           ───────────────────────────────────────────────────────────── */}
@@ -173,7 +241,7 @@ export default function Hero() {
         <div
           ref={bgInnerRef}
           className="h-full w-full will-change-transform"
-          style={{ transform: "scale(1.12)" }}
+          style={{ transform: "scale(1.15)" }}
         >
           <img
             src={mandap}
@@ -245,7 +313,7 @@ export default function Hero() {
 
       {/* ─────────────────────────────────────────────────────────────
           PLATE 2: THE COUPLE CUTOUT (z-30)
-          Tilts in 3D perspective by default when the phone is tilted!
+          Tilts in 3D perspective from their feet when the phone is tilted!
           ───────────────────────────────────────────────────────────── */}
       <motion.div
         style={{ y: figureScrollY }}
@@ -256,7 +324,7 @@ export default function Hero() {
           className="relative flex h-full w-full items-end justify-center will-change-transform"
           style={{
             transformStyle: "preserve-3d",
-            perspective: "1000px",
+            transformOrigin: "center 85%", // Tilts naturally around stage footing
           }}
         >
           {/* Ground contact shadow dynamically shifting with the 3D tilt */}
