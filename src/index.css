@@ -3,7 +3,8 @@
 @theme {
   --font-display: "Cormorant Garamond", ui-serif, Georgia, serif;
   --font-sans: "Jost", ui-sans-serif, system-ui, sans-serif;
-  --font-tamil: "Noto Serif Tamil", ui-serif, serif;
+  --font-telugu: "Noto Serif Telugu", ui-serif, serif;
+  --font-tamil: "Noto Serif Telugu", "Noto Serif Tamil", ui-serif, serif;
   --font-deva: "Noto Serif Devanagari", ui-serif, serif;
 
   --color-paper: #f7eedc;
@@ -45,6 +46,11 @@
 }
 
 @layer components {
+  .font-telugu {
+    font-family: var(--font-telugu);
+    line-height: 1.6;
+  }
+
   .label {
     font-family: var(--font-sans);
     font-size: 0.6875rem;

@@ -1,381 +1,402 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
+import { useRef } from "react";
+import { motion, useScroll, useTransform, useReducedMotion } from "framer-motion";
 import mandap from "../assets/mandap.jpg";
-import coupleCutout from "../assets/couple.png";
-import PetalCanvas from "./PetalCanvas";
-import { Monogram } from "./ui";
+import ganeshaGold from "../assets/ganesha-gold.png";
+import { CornerFlourish, Monogram } from "./ui";
 
 export default function Hero() {
-  const reduced = useReducedMotion();
   const containerRef = useRef<HTMLElement | null>(null);
+  const reduced = useReducedMotion();
 
-  // Direct DOM references for 60/120fps GPU transforms (zero React re-renders, zero glitching)
-  const bgInnerRef = useRef<HTMLDivElement | null>(null);
-  const figureInnerRef = useRef<HTMLDivElement | null>(null);
-  const shadowInnerRef = useRef<HTMLDivElement | null>(null);
-  const frontPetalsRef = useRef<HTMLDivElement | null>(null);
+  // Scroll progress through the 260vh track
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start start", "end end"],
+  });
 
-  // Whether iOS requires explicit tap to grant motion permission
-  const [needsIosPermission, setNeedsIosPermission] = useState(false);
-  const [gyroActive, setGyroActive] = useState(false);
-
-  // Tilt targets and smoothed interpolation values
-  const targetX = useRef(0);
-  const targetY = useRef(0);
-  const currentX = useRef(0);
-  const currentY = useRef(0);
-
-  // Touch tracking for drag fallback
-  const touchStart = useRef({ x: 0, y: 0 });
-  const isTouching = useRef(false);
-
-  // Silky smooth 60/120fps GPU compositor loop
-  useEffect(() => {
-    let raf = 0;
-    const lerp = reduced ? 1 : 0.12;
-
-    const tick = () => {
-      currentX.current += (targetX.current - currentX.current) * lerp;
-      currentY.current += (targetY.current - currentY.current) * lerp;
-
-      const cx = Number.isFinite(currentX.current) ? currentX.current : 0;
-      const cy = Number.isFinite(currentY.current) ? currentY.current : 0;
-
-      // 1. Couple tilts in true 3D perspective from their stage footing
-      if (figureInnerRef.current) {
-        const coupleTranslateX = cx * 32;
-        const coupleTranslateY = cy * 16;
-        const rotateY = cx * 12.0; // prominent degrees roll
-        const rotateX = -cy * 8.5; // prominent degrees pitch
-        figureInnerRef.current.style.transform = `perspective(750px) translate3d(${coupleTranslateX.toFixed(2)}px, ${coupleTranslateY.toFixed(2)}px, 0) rotateY(${rotateY.toFixed(2)}deg) rotateX(${rotateX.toFixed(2)}deg)`;
-      }
-
-      // 2. Mandap background moves in counter-parallax (deep 3D stage depth)
-      if (bgInnerRef.current) {
-        const bgTranslateX = -cx * 22;
-        const bgTranslateY = -cy * 14;
-        bgInnerRef.current.style.transform = `translate3d(${bgTranslateX.toFixed(2)}px, ${bgTranslateY.toFixed(2)}px, 0) scale(1.15)`;
-      }
-
-      // 3. Stage contact shadow beneath feet shifts dynamically
-      if (shadowInnerRef.current) {
-        const shadowX = -cx * 14;
-        const scaleX = Math.max(0.65, 1 - Math.abs(cx) * 0.12);
-        shadowInnerRef.current.style.transform = `translate3d(${shadowX.toFixed(2)}px, 0, 0) scaleX(${scaleX.toFixed(2)})`;
-      }
-
-      // 4. Foreground petals float with camera parallax
-      if (frontPetalsRef.current) {
-        const frontX = cx * 40;
-        const frontY = cy * 22;
-        frontPetalsRef.current.style.transform = `translate3d(${frontX.toFixed(2)}px, ${frontY.toFixed(2)}px, 0)`;
-      }
-
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [reduced]);
-
-  // Mobile Device Orientation (Gyroscope tilt)
-  useEffect(() => {
-    if (reduced) return;
-
-    let baseGamma: number | null = null;
-    let baseBeta: number | null = null;
-
-    const onOrientation = (e: DeviceOrientationEvent) => {
-      if (e.gamma === null || e.beta === null) return;
-      if (!Number.isFinite(e.gamma) || !Number.isFinite(e.beta)) return;
-
-      setGyroActive(true);
-      setNeedsIosPermission(false);
-
-      // Calibrate base holding angle on first measurement
-      if (baseGamma === null) baseGamma = e.gamma;
-      if (baseBeta === null) baseBeta = e.beta;
-
-      // Slow drift centering so neutral angle comfortably adapts to user posture
-      baseGamma += (e.gamma - baseGamma) * 0.003;
-      baseBeta += (e.beta - baseBeta) * 0.003;
-
-      // Relative delta from natural holding position
-      const deltaGamma = e.gamma - baseGamma;
-      const deltaBeta = e.beta - baseBeta;
-
-      // 15 degrees tilt maps to full 3D range (-1 to 1)
-      targetX.current = Math.max(-1, Math.min(1, deltaGamma / 15));
-      targetY.current = Math.max(-1, Math.min(1, deltaBeta / 15));
-    };
-
-    // Check if iOS 13+ permission API exists
-    const hasIosPermissionApi =
-      typeof window !== "undefined" &&
-      typeof (window.DeviceOrientationEvent as unknown as { requestPermission?: () => void })
-        ?.requestPermission === "function";
-
-    if (hasIosPermissionApi) {
-      setNeedsIosPermission(true);
-    } else {
-      // Android and standard browsers: listen immediately by default
-      window.addEventListener("deviceorientation", onOrientation, true);
-    }
-
-    // Function to activate on user tap (required by Apple iOS)
-    const requestIosPermission = async () => {
-      const DeviceOrientation = window.DeviceOrientationEvent as unknown as {
-        requestPermission?: () => Promise<string>;
-      };
-      if (typeof DeviceOrientation?.requestPermission === "function") {
-        try {
-          const res = await DeviceOrientation.requestPermission();
-          if (res === "granted") {
-            setNeedsIosPermission(false);
-            setGyroActive(true);
-            window.addEventListener("deviceorientation", onOrientation, true);
-          }
-        } catch {
-          // User dismissed or error
-        }
-      }
-    };
-
-    // Attach to document click/touchend so ANY tap on the screen requests iOS permission seamlessly
-    const handleDocumentClick = () => {
-      if (hasIosPermissionApi) {
-        requestIosPermission();
-      }
-    };
-
-    window.addEventListener("click", handleDocumentClick, { passive: true });
-    window.addEventListener("touchend", handleDocumentClick, { passive: true });
-
-    return () => {
-      window.removeEventListener("deviceorientation", onOrientation, true);
-      window.removeEventListener("click", handleDocumentClick);
-      window.removeEventListener("touchend", handleDocumentClick);
-    };
-  }, [reduced]);
-
-  // Touch drag / Pointer fallback (works on desktop or before gyro is activated)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      isTouching.current = true;
-      touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isTouching.current || e.touches.length !== 1) return;
-    const dx = e.touches[0].clientX - touchStart.current.x;
-    const dy = e.touches[0].clientY - touchStart.current.y;
-    // Normalized by half screen width
-    targetX.current = Math.max(-1, Math.min(1, dx / (window.innerWidth * 0.35)));
-    targetY.current = Math.max(-1, Math.min(1, dy / (window.innerHeight * 0.35)));
-  };
-
-  const handleTouchEnd = () => {
-    isTouching.current = false;
-    if (!gyroActive) {
-      targetX.current = 0;
-      targetY.current = 0;
-    }
-  };
-
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (reduced) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = ((e.clientY - rect.top) / rect.height) * 2 - 1;
-      targetX.current = Math.max(-1, Math.min(1, x));
-      targetY.current = Math.max(-1, Math.min(1, y));
-    },
-    [reduced],
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 1: TOP 25% ENVELOPE FLAP & POCKET (scroll: 0.0 -> 0.28)
+     Ranges extend to 1.0 so Web Animations API never finishes early!
+     ───────────────────────────────────────────────────────────── */
+  const topFlapRotateX = useTransform(
+    scrollYProgress,
+    [0.02, 0.22, 1],
+    [0, reduced ? 0 : -145, reduced ? 0 : -145]
+  );
+  const topFlapOpacity = useTransform(
+    scrollYProgress,
+    [0.17, 0.23, 1],
+    [1, 0, 0]
   );
 
-  const handlePointerLeave = useCallback(() => {
-    if (!gyroActive) {
-      targetX.current = 0;
-      targetY.current = 0;
-    }
-  }, [gyroActive]);
+  // Wax seal on the 25% seam
+  const sealScale = useTransform(
+    scrollYProgress,
+    [0, 0.08, 0.2, 1],
+    [1, 1.25, 0.4, 0.4]
+  );
+  const sealOpacity = useTransform(
+    scrollYProgress,
+    [0.05, 0.17, 1],
+    [1, 0, 0]
+  );
 
-  // Scroll Parallax (Smoothly isolated on outer wrappers so it never conflicts with tilt)
-  const { scrollY } = useScroll();
-  const bgScrollY = useTransform(scrollY, [0, 900], [0, reduced ? 0 : 120]);
-  const figureScrollY = useTransform(scrollY, [0, 900], [0, reduced ? 0 : -55]);
-  const typeScrollY = useTransform(scrollY, [0, 900], [0, reduced ? 0 : 35]);
-  const typeFade = useTransform(scrollY, [0, 520], [1, 0]);
+  // Envelope bottom pocket (lower 75%) slides down completely off screen (100% opaque, zero bleed)
+  const envelopePocketY = useTransform(
+    scrollYProgress,
+    [0.08, 0.26, 1],
+    [0, reduced ? 0 : 900, reduced ? 0 : 900]
+  );
+
+  // Completely remove envelope from DOM rendering once slid off
+  const envelopeDisplay = useTransform(
+    scrollYProgress,
+    (v) => (v >= 0.27 ? "none" : "block")
+  );
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 2: INSIDE CARD SLIDES UP TO THE TOP (scroll: 0.04 -> 0.28)
+     ───────────────────────────────────────────────────────────── */
+  const cardSlideY = useTransform(
+    scrollYProgress,
+    [0.04, 0.26, 1],
+    [reduced ? 0 : 160, 0, 0]
+  );
+  const cardScale = useTransform(
+    scrollYProgress,
+    [0.04, 0.26, 1],
+    [0.92, 1.0, 1.0]
+  );
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3 & 4: CARD OPENS LIKE A BOOK (scroll: 0.34 -> 0.72)
+     The front page (with Lord Ganesha in gold) swings open to the left
+     ───────────────────────────────────────────────────────────── */
+  const bookRotateY = useTransform(
+    scrollYProgress,
+    [0.34, 0.68, 1],
+    [0, reduced ? 0 : -135, reduced ? 0 : -135]
+  );
+  const bookCoverOpacity = useTransform(
+    scrollYProgress,
+    [0.54, 0.68, 1],
+    [1, 0, 0]
+  );
+  const bookCoverDisplay = useTransform(
+    scrollYProgress,
+    (v) => (v >= 0.70 ? "none" : "flex")
+  );
+
+  // Details inside book emerge as the cover opens
+  const detailsScale = useTransform(
+    scrollYProgress,
+    [0.34, 0.68, 1],
+    [0.96, 1.0, 1.0]
+  );
+  const detailsOpacity = useTransform(
+    scrollYProgress,
+    [0.32, 0.55, 1],
+    [0.6, 1.0, 1.0]
+  );
 
   return (
-    <header
+    <section
       ref={containerRef}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      className="relative z-0 h-[100svh] min-h-[640px] w-full overflow-hidden bg-stage select-none cursor-pointer"
+      className="relative z-10 h-[260vh] w-full"
+      aria-label="Royal wedding card opening intro"
     >
-      {/* ─────────────────────────────────────────────────────────────
-          iOS SAFARI 3D ACTIVATION HINT (Appears only on iOS until tapped)
-          ───────────────────────────────────────────────────────────── */}
-      {needsIosPermission && (
-        <div className="absolute top-5 right-5 z-40 animate-pulse pointer-events-none">
-          <div className="rounded-full border border-gold/50 bg-kumkum-dark/95 px-3.5 py-1.5 text-[0.72rem] font-medium tracking-wide text-gold-light shadow-[0_4px_20px_rgba(20,8,3,0.6)] backdrop-blur-md">
-            ✨ Tap screen to enable 3D Tilt
-          </div>
-        </div>
-      )}
+      {/* Sticky 100vh viewport */}
+      <div className="sticky top-0 h-[100svh] min-h-[640px] w-full overflow-hidden bg-stage select-none">
 
-      {/* ─────────────────────────────────────────────────────────────
-          PLATE 1: MANDAP BACKGROUND (Farthest 3D Layer, z-0)
-          ───────────────────────────────────────────────────────────── */}
-      <motion.div
-        style={{ y: bgScrollY }}
-        className="absolute inset-0 overflow-hidden will-change-transform"
-      >
-        <div
-          ref={bgInnerRef}
-          className="h-full w-full will-change-transform"
-          style={{ transform: "scale(1.15)" }}
-        >
-          <img
-            src={mandap}
-            alt="The wedding mandap dressed with jasmine and rose garlands, brass oil lamps lit"
-            className="h-full w-full object-cover object-top filter brightness-[0.96] contrast-[1.04]"
-            loading="eager"
-            decoding="async"
-          />
-        </div>
-      </motion.div>
-
-      {/* Atmospheric warm lighting & depth vignette */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_35%,rgba(36,18,7,0.15)_0%,rgba(36,18,7,0.08)_45%,rgba(36,18,7,0.78)_100%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(25,12,5,0.65)_0%,rgba(25,12,5,0.18)_30%,rgba(25,12,5,0)_60%,rgba(25,12,5,0.85)_100%)]" />
-
-      {/* ─────────────────────────────────────────────────────────────
-          TYPOGRAPHY PLANE (Behind Couple, z-10)
-          ───────────────────────────────────────────────────────────── */}
-      <motion.div
-        style={{ y: typeScrollY, opacity: typeFade }}
-        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-full"
-      >
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute left-1/2 top-[34%] -translate-x-1/2 -translate-y-1/2 font-display text-[clamp(9rem,42vw,14rem)] leading-none text-gold/20 italic select-none"
-        >
-          &amp;
-        </span>
-
-        <div className="relative px-5 pt-[3.5svh] text-center">
-          <p className="font-tamil text-[0.95rem] leading-relaxed tracking-wide text-gold-light drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-            பெருமையுடன் அழைக்கிறோம்
-          </p>
-          <p className="label mt-2 text-paper/90 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-            Together with their families
-          </p>
-
-          <h1 className="mt-4 font-display text-paper">
-            <span className="block text-[clamp(2.8rem,14vw,4.8rem)] leading-[0.88] font-light tracking-tight [text-shadow:0_3px_25px_rgba(15,7,2,0.95)]">
-              Aadhira
-            </span>
-            <span className="my-1.5 flex items-center justify-center gap-3">
-              <span className="h-px w-8 bg-gold-light/60 sm:w-14" />
-              <span className="font-display text-[1.5rem] text-gold-light italic drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)] sm:text-[1.9rem]">
-                weds
-              </span>
-              <span className="h-px w-8 bg-gold-light/60 sm:w-14" />
-            </span>
-            <span className="block text-[clamp(2.8rem,14vw,4.8rem)] leading-[0.88] font-light tracking-tight [text-shadow:0_3px_25px_rgba(15,7,2,0.95)]">
-              Karthikeya
-            </span>
-          </h1>
-        </div>
-      </motion.div>
-
-      {/* ─────────────────────────────────────────────────────────────
-          PRIMARY LIGHT PINK ROSE PETAL SHOWER (z-20)
-          Falls continuously from top, passing BETWEEN background and couple!
-          ───────────────────────────────────────────────────────────── */}
-      <div className="pointer-events-none absolute inset-0 z-20">
-        <PetalCanvas
-          className="h-full w-full"
-          count={50}
-          minSize={13}
-          maxSize={35}
-          speed={1.05}
-        />
-      </div>
-
-      {/* ─────────────────────────────────────────────────────────────
-          PLATE 2: THE COUPLE CUTOUT (z-30)
-          Tilts in 3D perspective from their feet when the phone is tilted!
-          ───────────────────────────────────────────────────────────── */}
-      <motion.div
-        style={{ y: figureScrollY }}
-        className="pointer-events-none absolute inset-0 z-30 flex items-end justify-center will-change-transform"
-      >
-        <div
-          ref={figureInnerRef}
-          className="relative flex h-full w-full items-end justify-center will-change-transform"
+        {/* ==============================================================
+            THE INSIDE CARD (Slides UP from envelope, then opens like a book)
+            ============================================================== */}
+        <motion.div
           style={{
-            transformStyle: "preserve-3d",
-            transformOrigin: "center 85%", // Tilts naturally around stage footing
+            y: cardSlideY,
+            scale: cardScale,
           }}
+          className="absolute inset-0 z-10 h-full w-full will-change-transform"
         >
-          {/* Ground contact shadow dynamically shifting with the 3D tilt */}
           <div
-            ref={shadowInnerRef}
-            className="absolute bottom-[3%] h-9 w-[320px] max-w-[80vw] rounded-[100%] bg-black/60 blur-xl will-change-transform sm:bottom-[4%] sm:w-[420px]"
-          />
+            className="relative h-full w-full overflow-hidden"
+            style={{ perspective: "1800px" }}
+          >
+            {/* ─────────────────────────────────────────────────────────
+                INNER SPREAD: WEDDING DETAILS (Inside the opened book)
+                ───────────────────────────────────────────────────────── */}
+            <motion.div
+              style={{
+                scale: detailsScale,
+                opacity: detailsOpacity,
+              }}
+              className="absolute inset-0 h-full w-full overflow-hidden bg-stage"
+            >
+              {/* Sacred Mandap backdrop */}
+              <div className="absolute inset-0 overflow-hidden">
+                <img
+                  src={mandap}
+                  alt="The sacred wedding mandap dressed with jasmine and rose garlands, brass oil lamps lit"
+                  className="h-full w-full object-cover object-top filter brightness-[0.92] contrast-[1.05]"
+                  loading="eager"
+                  decoding="async"
+                />
+              </div>
 
-          <img
-            src={coupleCutout}
-            alt="Aadhira and Karthikeya in traditional golden wedding silk and fresh lotus garlands"
-            className="h-[65%] max-h-[82%] min-h-[340px] w-auto max-w-none object-contain object-bottom drop-shadow-[0_14px_38px_rgba(20,8,3,0.55)] select-none will-change-transform"
-            loading="eager"
-            decoding="async"
-          />
-        </div>
-      </motion.div>
+              {/* Atmospheric warm lighting, sacred glow & vignette */}
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_35%,rgba(36,18,7,0.2)_0%,rgba(36,18,7,0.1)_45%,rgba(36,18,7,0.85)_100%)]" />
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(25,12,5,0.72)_0%,rgba(25,12,5,0.22)_35%,rgba(25,12,5,0.15)_60%,rgba(25,12,5,0.92)_100%)]" />
 
-      {/* ─────────────────────────────────────────────────────────────
-          FOREGROUND FLOATING LIGHT PINK PETALS (z-40)
-          Soft out-of-focus camera petals passing in front
-          ───────────────────────────────────────────────────────────── */}
-      <div
-        ref={frontPetalsRef}
-        className="pointer-events-none absolute inset-0 z-40 opacity-80 blur-[2.2px] will-change-transform"
-      >
-        <PetalCanvas
-          className="h-full w-full"
-          count={9}
-          minSize={40}
-          maxSize={75}
-          speed={1.65}
-        />
-      </div>
+              {/* Typography inside the opened book */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-full flex-col justify-between px-5 pt-[5svh] pb-24 text-center sm:pt-[7svh]">
+                <div className="relative mx-auto max-w-2xl">
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-1/2 top-[58%] -translate-x-1/2 -translate-y-1/2 font-display text-[clamp(8rem,36vw,13rem)] leading-none text-gold/15 italic select-none"
+                  >
+                    &amp;
+                  </span>
 
-      {/* ─────────────────────────────────────────────────────────────
-          BOTTOM BANNER & EVENT DETAILS (z-50)
-          ───────────────────────────────────────────────────────────── */}
-      <div className="absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,rgba(26,11,4,0.96)_0%,rgba(26,11,4,0.78)_48%,rgba(26,11,4,0)_100%)] px-5 pb-14 pt-24 pointer-events-auto">
-        <div className="mx-auto flex max-w-lg items-end justify-between gap-4 border-t border-gold/35 pt-4">
-          <div>
-            <p className="label text-gold-light/90">Muhurtham</p>
-            <p className="tnum mt-1 font-display text-2xl font-medium text-paper">10:48 AM</p>
+                  <p className="font-telugu text-[1.1rem] sm:text-[1.3rem] font-medium tracking-wide text-gold-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
+                    || శ్రీరస్తు · శుభమస్తు · అవిఘ్నమస్తు ||
+                  </p>
+                  <p className="font-telugu mt-1.5 text-[1rem] sm:text-[1.12rem] tracking-wide text-paper/95 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
+                    సగౌరవంగా ఆహ్వానిస్తున్నాము
+                  </p>
+                  <p className="label mt-2 text-paper/85 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
+                    Together with their families
+                  </p>
+
+                  <h1 className="mt-5 font-display text-paper">
+                    <span className="block font-telugu text-[1.65rem] sm:text-[2.2rem] font-normal text-gold-light tracking-wide drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
+                      ఆదిర
+                    </span>
+                    <span className="block text-[clamp(2.9rem,11vw,4.8rem)] leading-[0.9] font-light tracking-tight [text-shadow:0_3px_25px_rgba(15,7,2,0.95)]">
+                      Aadhira
+                    </span>
+
+                    <span className="my-2.5 flex items-center justify-center gap-3">
+                      <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                      <span className="font-telugu text-[0.95rem] sm:text-[1.05rem] text-gold-light/90 font-medium">
+                        పరిణయం
+                      </span>
+                      <span className="font-display text-[1.4rem] text-gold-light italic drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)] sm:text-[1.7rem]">
+                        weds
+                      </span>
+                      <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                    </span>
+
+                    <span className="block font-telugu text-[1.65rem] sm:text-[2.2rem] font-normal text-gold-light tracking-wide drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
+                      కార్తికేయ
+                    </span>
+                    <span className="block text-[clamp(2.9rem,11vw,4.8rem)] leading-[0.9] font-light tracking-tight [text-shadow:0_3px_25px_rgba(15,7,2,0.95)]">
+                      Karthikeya
+                    </span>
+                  </h1>
+
+                  <p className="font-telugu mt-4 text-[0.95rem] text-paper/90 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                    కళ్యాణ మహోత్సవ ఆహ్వాన పత్రిక
+                  </p>
+                </div>
+              </div>
+
+              {/* Bottom details banner inside */}
+              <div className="absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,rgba(26,11,4,0.98)_0%,rgba(26,11,4,0.85)_50%,rgba(26,11,4,0)_100%)] px-5 pb-14 pt-20">
+                <div className="mx-auto flex max-w-xl items-end justify-between gap-4 border-t border-gold/35 pt-4">
+                  <div>
+                    <p className="font-telugu text-[0.85rem] text-gold-light font-medium leading-none">ముహూర్తం</p>
+                    <p className="label mt-1 text-gold-light/90">Muhurtham</p>
+                    <p className="tnum mt-1 font-display text-2xl font-medium text-paper">10:48 AM</p>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <Monogram className="h-10 w-10 shrink-0 opacity-90" stroke="#E4C076" />
+                    <p className="font-telugu mt-1 text-[0.72rem] text-gold-light/80">శుభం</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-telugu text-[0.85rem] text-gold-light font-medium leading-none">శనివారం · తిరుపతి</p>
+                    <p className="label mt-1 text-gold-light/90">Saturday · Tirupati</p>
+                    <p className="tnum mt-1 font-display text-2xl font-medium text-paper">21 · 11 · 2026</p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* ─────────────────────────────────────────────────────────
+                FRONT COVER OF THE BOOK: LORD GANESHA IN RADIANT GOLD
+                Hinged on the left spine: opens like a book (rotateY)
+                ───────────────────────────────────────────────────────── */}
+            <motion.div
+              style={{
+                transformOrigin: "left center",
+                rotateY: bookRotateY,
+                opacity: bookCoverOpacity,
+                display: bookCoverDisplay,
+              }}
+              className="absolute inset-0 z-20 flex h-full w-full flex-col justify-between overflow-hidden bg-gradient-to-br from-[#290514] via-[#430f23] to-[#1e030e] p-6 shadow-[20px_0_50px_rgba(0,0,0,0.9)] will-change-transform sm:p-12"
+            >
+              {/* Opaque royal paper background texture with gold radial illumination */}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(228,192,118,0.22)_0%,transparent_75%)]" />
+              <div className="grain absolute inset-3 border-2 border-gold/55 shadow-[inset_0_0_0_3px_rgba(56,11,28,0.9),inset_0_0_0_4px_rgba(228,192,118,0.35)] sm:inset-6" />
+
+              {/* Corner flourishes on book cover */}
+              <CornerFlourish className="absolute left-5 top-5 h-8 w-8 text-gold-light opacity-85 sm:left-8 sm:top-8 sm:h-12 sm:w-12" />
+              <CornerFlourish className="absolute right-5 top-5 h-8 w-8 rotate-90 text-gold-light opacity-85 sm:right-8 sm:top-8 sm:h-12 sm:w-12" />
+              <CornerFlourish className="absolute left-5 bottom-5 h-8 w-8 -rotate-90 text-gold-light opacity-85 sm:left-8 sm:bottom-8 sm:h-12 sm:w-12" />
+              <CornerFlourish className="absolute right-5 bottom-5 h-8 w-8 rotate-180 text-gold-light opacity-85 sm:right-8 sm:bottom-8 sm:h-12 sm:w-12" />
+
+              {/* Left spine shadow */}
+              <div className="pointer-events-none absolute left-0 inset-y-0 w-8 bg-gradient-to-r from-black/70 to-transparent sm:w-12" />
+
+              {/* Top Invocation on Book Cover */}
+              <div className="relative z-10 text-center pt-2 sm:pt-4">
+                <p className="font-telugu text-[1.15rem] sm:text-[1.35rem] font-semibold tracking-wider text-gold-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
+                  || శ్రీ గణేశాయ నమః ||
+                </p>
+                <p className="font-telugu mt-1 text-[0.82rem] sm:text-[0.95rem] text-gold-light/90 tracking-wide">
+                  వక్రతుండ మహాకాయ సూర్యకోటి సమప్రభ । నిర్విఘ్నం కురు మే దేవ సర్వకార్యేషు సర్వదా ॥
+                </p>
+              </div>
+
+              {/* CENTERPIECE: LORD GANESHA IN RADIANT GOLD */}
+              <div className="relative z-10 my-auto flex flex-col items-center justify-center py-2 text-center">
+                <div className="relative flex items-center justify-center">
+                  {/* Subtle divine golden glow behind Lord Ganesha */}
+                  <div className="absolute inset-0 -m-8 sm:-m-12 rounded-full bg-[radial-gradient(circle,rgba(245,216,138,0.4)_0%,rgba(228,192,118,0.15)_50%,transparent_75%)] blur-2xl pointer-events-none" />
+                  <img
+                    src={ganeshaGold}
+                    alt="Lord Ganesha in radiant gold"
+                    className="relative z-10 h-44 w-auto max-w-[280px] object-contain drop-shadow-[0_12px_40px_rgba(228,192,118,0.7)] sm:h-64 sm:max-w-[420px] md:h-72 filter brightness-[1.04] contrast-[1.02] select-none"
+                    loading="eager"
+                    decoding="async"
+                  />
+                </div>
+
+                <div className="mt-3">
+                  <p className="font-telugu text-[1.35rem] sm:text-[1.8rem] font-medium text-gold-light drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
+                    ఆదిర &amp; కార్తికేయ
+                  </p>
+                  <p className="font-display text-base sm:text-xl text-paper/85 italic">
+                    Aadhira weds Karthikeya
+                  </p>
+                  <p className="font-telugu mt-1 text-[0.88rem] sm:text-[0.98rem] text-gold-light/90">
+                    వివాహ మహోత్సవ ఆహ్వాన పత్రిక
+                  </p>
+                </div>
+              </div>
+
+              {/* Bottom line on Book Cover */}
+              <div className="relative z-10 text-center pb-2 sm:pb-4">
+                <div className="mx-auto flex items-center justify-center gap-3 opacity-90">
+                  <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                  <span className="font-telugu text-[0.82rem] sm:text-[0.92rem] text-gold-light font-medium">
+                    21 నవంబర్ 2026 · తిరుపతి, ఆంధ్రప్రదేశ్
+                  </span>
+                  <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                </div>
+              </div>
+            </motion.div>
           </div>
-          <Monogram className="h-10 w-10 shrink-0 opacity-90" stroke="#E4C076" />
-          <div className="text-right">
-            <p className="label text-gold-light/90">Saturday · Chennai</p>
-            <p className="tnum mt-1 font-display text-2xl font-medium text-paper">21 · 11 · 2026</p>
+        </motion.div>
+
+        {/* ==============================================================
+            THE OUTER ENVELOPE (TOP 25% FLAP & 75% POCKET)
+            Completely opaque, covers the screen until opened
+            ============================================================== */}
+        <motion.div
+          style={{ display: envelopeDisplay }}
+          className="absolute inset-0 z-30"
+        >
+          <div
+            className="relative h-full w-full"
+            style={{ perspective: "1500px" }}
+          >
+            {/* BOTTOM ENVELOPE POCKET (75% height: from top 25% to bottom) */}
+            <motion.div
+              style={{
+                y: envelopePocketY,
+              }}
+              className="absolute top-[25%] inset-x-0 bottom-0 overflow-hidden border-t-2 border-gold/75 bg-[#2A0514] shadow-[0_-15px_45px_rgba(0,0,0,0.85)] will-change-transform"
+            >
+              {/* Opaque royal textured finish with zero bleed-through */}
+              <div className="absolute inset-0 bg-gradient-to-b from-[#380b1d] via-[#2A0514] to-[#1c030c]" />
+              <div className="grain absolute inset-3 border border-gold/45 shadow-[inset_0_0_0_2px_rgba(56,11,28,0.9),inset_0_0_0_3px_rgba(228,192,118,0.25)] sm:inset-5" />
+
+              <CornerFlourish className="absolute left-4 bottom-4 h-8 w-8 -rotate-90 text-gold-light opacity-80 sm:left-6 sm:bottom-6 sm:h-10 sm:w-10" />
+              <CornerFlourish className="absolute right-4 bottom-4 h-8 w-8 rotate-180 text-gold-light opacity-80 sm:right-6 sm:bottom-6 sm:h-10 sm:w-10" />
+
+              {/* Envelope pocket cover design */}
+              <div className="relative flex h-full flex-col justify-between p-6 sm:p-10 pt-10 sm:pt-14 text-center">
+                <div className="mx-auto max-w-md">
+                  <div className="mx-auto flex items-center justify-center gap-3 opacity-80">
+                    <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                    <span className="font-telugu text-[0.85rem] text-gold-light">
+                      లగ్న పత్రిక
+                    </span>
+                    <span className="h-px w-10 bg-gold-light/60 sm:w-16" />
+                  </div>
+                  <p className="font-telugu mt-3 text-lg sm:text-2xl text-gold-light font-medium">
+                    వివాహ మహోత్సవ ఆహ్వాన పత్రిక
+                  </p>
+                  <p className="tnum font-telugu text-[0.85rem] sm:text-[0.95rem] text-gold-light/90 mt-1">
+                    21 నవంబర్ 2026 · తిరుపతి, ఆంధ్రప్రదేశ్
+                  </p>
+                </div>
+
+                <div className="pb-4">
+                  <p className="label text-[0.62rem] sm:text-[0.72rem] text-gold-light/60 tracking-[0.25em]">
+                    Sri Venkateswara Kalyana Mandapam · Tirupati
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* TOP 25% FLAP (Hinged at top edge, flips open UPWARD) */}
+            <motion.div
+              style={{
+                transformOrigin: "top center",
+                rotateX: topFlapRotateX,
+                opacity: topFlapOpacity,
+              }}
+              className="absolute top-0 inset-x-0 h-[25%] overflow-hidden border-b-2 border-gold/75 bg-[#2A0514] shadow-[0_15px_45px_rgba(0,0,0,0.9)] will-change-transform"
+            >
+              {/* Opaque royal textured finish */}
+              <div className="absolute inset-0 bg-gradient-to-b from-[#1e030e] via-[#33081a] to-[#3a0b1d]" />
+              <div className="grain absolute inset-2.5 border border-gold/45 shadow-[inset_0_0_0_2px_rgba(72,17,38,0.9),inset_0_0_0_3px_rgba(228,192,118,0.3)] sm:inset-4" />
+
+              <CornerFlourish className="absolute left-3 top-3 h-7 w-7 text-gold-light opacity-80 sm:left-5 sm:top-5 sm:h-9 sm:w-9" />
+              <CornerFlourish className="absolute right-3 top-3 h-7 w-7 rotate-90 text-gold-light opacity-80 sm:right-5 sm:top-5 sm:h-9 sm:w-9" />
+
+              {/* Top 25% flap content */}
+              <div className="relative flex h-full flex-col justify-center px-6 text-center">
+                <p className="font-telugu text-[0.92rem] sm:text-[1.15rem] font-semibold tracking-wider text-gold-light drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
+                  || శ్రీరస్తు · శుభమస్తు · అవిఘ్నమస్తు ||
+                </p>
+                <p className="label mt-1 text-[0.58rem] sm:text-[0.66rem] text-gold-light/80">
+                  Royal Wedding Invitation
+                </p>
+              </div>
+            </motion.div>
+
+            {/* GOLDEN WAX SEAL AT THE 25% SEAM LINE */}
+            <motion.div
+              style={{
+                scale: sealScale,
+                opacity: sealOpacity,
+              }}
+              className="absolute left-1/2 top-[25%] -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none"
+            >
+              <div className="relative flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-full bg-gradient-to-tr from-[#8E6523] via-[#E6C075] to-[#FDE8AE] p-[2.5px] shadow-[0_10px_35px_rgba(0,0,0,0.85),inset_0_2px_4px_rgba(255,255,255,0.5)]">
+                <div className="relative flex h-full w-full items-center justify-center rounded-full border border-gold/60 bg-[#2A0514] p-2 text-center shadow-[inset_0_3px_10px_rgba(0,0,0,0.7)]">
+                  <Monogram className="h-12 w-12 sm:h-14 sm:w-14" stroke="#F5D88A" />
+                  <span className="font-telugu absolute bottom-0.5 text-[0.55rem] sm:text-[0.62rem] font-semibold text-gold-light tracking-wide">
+                    శుభం
+                  </span>
+                </div>
+              </div>
+            </motion.div>
           </div>
-        </div>
+        </motion.div>
       </div>
-    </header>
+    </section>
   );
 }
